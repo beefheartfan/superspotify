@@ -1,0 +1,38 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the superspotify module.
+ */
+
+/**
+ * Implements hook_requirements().
+ */
+function superspotify_requirements($phase) {
+  $requirements = array();
+  $t = get_t();
+
+  $has_curl = function_exists('curl_init');
+
+  $requirements['curl'] = array(
+    'title' => $t('cURL'),
+    'value' => $has_curl ? $t('Enabled') : $t('Not found'),
+  );
+  if (!$has_curl) {
+    $requirements['curl']['severity'] = REQUIREMENT_ERROR;
+    $requirements['curl']['description'] = $t('The testing framework could not be installed because the PHP <a href="@curl_url">cURL</a> library is not available.', array('@curl_url' => 'http://php.net/manual/en/curl.setup.php'));
+  }
+
+  return $requirements;
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function superspotify_uninstall() {
+
+  // Remove settings variables.
+  variable_del('superspotify_clientid');
+  variable_del('superspotify_clientsecret');
+  variable_del('superspotify_redirecturi');
+}

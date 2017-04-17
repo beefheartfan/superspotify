@@ -1,0 +1,227 @@
+<?php
+/*
+ * Implements hook_permission
+*/
+function superspotify_permission() {
+  return array(
+    'access super spotify' => array(
+      'title' => t('Access Super Spotify'),
+      'description' => t('View the pages for the Super Spotify.'),
+    ),
+    'configure super spotify' => array(
+      'title' => t('Configure Super Spotify'),
+      'description' => t('Configure the pages for Super Spotify.'),
+    ),
+  );
+}
+
+/*
+ * Implements hook_menu
+*/
+function superspotify_menu() {
+
+  $items['admin/config/content/superspotify'] = array(
+    'title' => 'Super Spotify',
+    'description' => 'Configure Super Spotify',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('superspotify_admin'),
+    'type' => MENU_NORMAL_ITEM,
+    'access arguments' => array('configure super spotify'),
+    'file' => 'includes/superspotify.admin.inc',
+  );
+
+  $items['superspotify/albums'] = array(
+    'title' => 'Albums',
+    'description' => 'See Your Spotify Albums.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('superspotify_albumpage'),
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'access arguments' => array('access super spotify'),
+    'weight' => 1,
+  );
+ 
+  $items['superspotify/authorize'] = array(
+    'title' => 'Authorize',
+    'description' => 'Authorize Spotify.',
+    'page callback' => 'superspotify_authpage',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'access arguments' => array('access super spotify'),
+    'weight' => 1,
+  ); 
+ 
+  return $items;
+}
+
+/**
+ * Callback for Albums Page within superspotify_menu().
+*/
+function superspotify_albumpage() {
+drupal_set_time_limit(0);
+drupal_set_title(t('Your Albums'));
+$form = array();
+
+$clientid = variable_get('superspotify_clientid', '9a2c0cab21da438f94c38ce93d074684');
+$clientsecret = variable_get('superspotify_clientsecret', 'c75fb7a5f2ae40c1ac9485cde7be16c7');
+$redirecturi = variable_get('superspotify_redirecturi', 'http://plencnerlabs.com/superspotify/albums');
+
+$params = drupal_get_query_parameters();
+
+$url = 'https://accounts.spotify.com/api/token';
+$fields = array(
+	'grant_type' => 'authorization_code',
+	'code' => $params['code'],
+  'client_id' => $clientid,
+  'client_secret' => $clientsecret,
+	'redirect_uri' => $redirecturi,
+);
+
+//url-ify the data for the POST
+$fields_string = '';
+foreach($fields as $key=>$value) { $fields_string .= $key.'='.$value.'&'; }
+rtrim($fields_string, '&');
+
+$headers = array();
+$headers[] = 'Authorization: Basic '.base64_encode($clientid.':'.$clientsecret);
+$headers[] = 'Content-type: application/x-www-form-urlencoded';
+
+//open connection
+$ch = curl_init();
+
+//set the url, number of POST vars, POST data
+curl_setopt($ch,CURLOPT_URL, $url);
+curl_setopt($ch,CURLOPT_POST, count($fields));
+curl_setopt($ch,CURLOPT_POSTFIELDS, $fields_string);
+curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+
+//execute post
+$result_string = curl_exec($ch);
+$result_array = json_decode($result_string);
+$access_token = $result_array->access_token;
+//close connection
+curl_close($ch);
+
+drupal_add_js(drupal_get_path('module', 'superspotify') .'/js/superspotify-dropdown.js', 'file');
+
+   $form['genres'] = array(
+       '#type' => 'select',
+       '#title' => t('Genres'),
+       '#empty_option' => t('- All -'),
+       '#empty_value' => 'All',
+       '#options' => array(
+       ),
+       '#description' => t('Filter albums by genre.'),
+   );
+
+ $header = array('Artwork', 'Artist', 'Album', 'Release Date');
+ $rows = array();
+$table_attributes = array('id' => 'albums-table');
+
+// Get all of "My Albums"
+// Spotify only lets you get 50 albums at a time, so it needs to split the api calls up accordingly
+$return = superspotify_call_spotify('https://api.spotify.com/v1/me/albums?limit=50', $access_token);
+$myalbums = json_decode($return);
+$total_albums = $myalbums->total;
+$cnt = 1;
+$genre_cnt = 0;
+$full_artist_array = array();
+for ($x = 0; $x <= $total_albums; $x += 50) {
+    $artist_list = '';
+    // Get the details for each album and add them to a table row
+    $return = superspotify_call_spotify('https://api.spotify.com/v1/me/albums?offset='.$x.'&limit=50', $access_token); 
+    $myalbums = json_decode($return);
+    if (is_array($myalbums->items)) {
+        foreach ($myalbums->items as $item) {
+            $artist_name = $item->album->artists[0]->name;
+            $artist_id = $item->album->artists[0]->id;
+            $artist_href = 'https://play.spotify.com/artist/'.$artist_id;
+            $album_href = $item->album->external_urls->spotify;
+            $album_id = $item->album->id;
+            if (!empty($item->album->images)) {
+                $album_image_url = $item->album->images[0]->url;
+            }
+            else {
+                $album_image_url = '';
+            }
+
+            $album_name = $item->album->name;
+            $album_release_date = $item->album->release_date;
+            if (!empty($artist_list)) {
+                $artist_list .= ",";
+            }
+            $artist_list .= $artist_id;
+
+          $album_image_array = array(
+              'path' => $album_image_url, 
+              'alt' => $album_name,
+              'title' => $album_name,
+              'width' => 100,
+              'height' => 100,
+              );
+          $album_image = theme('image', $album_image_array);
+
+        $rows[] = array('data' => array(
+                l($album_image, $album_href, array('attributes' => array('target' => '_new'), 'html'=>TRUE)),
+                l($artist_name, $artist_href, array('attributes' => array('target' => '_new'))),
+                l($album_name, $album_href, array('attributes' => array('target' => '_new'))),
+                $album_release_date,
+                ),
+                'no_striping' => TRUE,
+            );
+
+            $cnt++;
+        }
+
+    //get the genres by artist (Spotify doesn't save genres by album)
+    //this gets artists in groups of 50 to make the api calls more efficient
+    $return = superspotify_call_spotify('https://api.spotify.com/v1/artists?ids='.$artist_list, $access_token); 
+    $myartists = json_decode($return);
+    foreach ($myartists->artists as $myartist) {
+        foreach ($myartist->genres as $genre) {
+            $form['genres']['#options'][str_replace(' ','-',$genre)] = $genre;
+        }
+        // save the genres as a CSS class in the row, so we can trigger off of it via the dropdown
+        $current_genres = implode(",",$myartist->genres);
+        $genre_classes = str_replace(' ', '-', $current_genres);
+        $genre_classes = str_replace(',', ' ', $genre_classes);
+        $rows[$genre_cnt]['class'] = array('album-row', $genre_classes);
+        $genre_cnt++;
+    
+    }
+  }
+}
+
+asort($form['genres']['#options']);
+
+$albums_table = theme('table', array('header' => $header, 'rows' => $rows, 'attributes' => $table_attributes));
+
+  $albums_table_output = '<div id="albums">'.$albums_table.'</div>';
+ 
+    $form['albums'] = array(
+    '#markup' => $albums_table_output,
+    );
+ 
+  return $form;
+}
+
+function superspotify_authpage() {
+    $clientid = variable_get('superspotify_clientid', '9a2c0cab21da438f94c38ce93d074684');
+    $redirecturi = variable_get('superspotify_redirecturi', 'http://plencnerlabs.com/superspotify/albums');
+    header('Location: https://accounts.spotify.com/authorize?response_type=code&show_dialog=true&client_id='.$clientid.'&scope=user-library-read&redirect_uri='.$redirecturi);
+}
+
+function superspotify_call_spotify($url, $access_token) {
+  $headerStr = "Authorization: Bearer ". $access_token ."\r\n";
+  // Create a stream
+  $opts = array(
+    'http'=>array(
+      'method'=>"GET",
+      'header'=>$headerStr,
+    )
+  );
+
+  $context = stream_context_create($opts);
+
+  // Open the file using the HTTP headers set above
+  return file_get_contents($url, false, $context);
+}

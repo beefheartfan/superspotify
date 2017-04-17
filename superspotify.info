@@ -1,0 +1,6 @@
+name = Super Spotify
+description = Using the Spotify API to make things better
+core = 7.x
+version = 7.x-1.0
+package = Spotify
+configure = admin/config/content/spotify
